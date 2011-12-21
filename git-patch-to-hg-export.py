@@ -8,13 +8,50 @@ USAGE: git-patch-to-hg-export.py < git.patch > hg.patch
 from email.utils import parsedate_tz, mktime_tz
 import re
 
+def read_header_line(fin):
+    header = None
+
+    YIELD = 0                   # Yield the current line.
+    APPEND = 1                  # Append to the current header.
+    HEADER = 2                  # Start a new header.
+    FINISH = 3                  # Yield the current header.
+
+    # If Python had `goto', we wouldn't need to mess with all this.
+    def action_for(header, line):
+        if (line == '\n' or line == '\r\n') and header is None:
+            return YIELD
+        elif line.startswith(' '):
+            return APPEND
+        elif header is None:
+            return HEADER
+        else:
+            return FINISH
+
+    for line in fin:
+        action = action_for(header, line)
+        if action == YIELD:
+            yield line
+        elif action == APPEND:
+            header = header[:-1] # Strip the newline.
+            header += line
+        elif action == HEADER:
+            header = line
+        else:
+            yield header
+            header = None
+            action = action_for(header, line)
+            if action == YIELD:
+                yield line
+            elif action == HEADER:
+                header = line
+
 def git_patch_to_hg(fin, fout):
     fout.write('# HG changeset patch\n')
 
     subject_re = re.compile(r'^(RE:)?\s*(\[[^]]*\])?\s*', re.I)
 
     # headers
-    for line in fin:
+    for line in read_header_line(fin):
         if line.startswith('From: '):
             fout.write('# User %s' % line[6:])
         elif line.startswith('Date: '):
